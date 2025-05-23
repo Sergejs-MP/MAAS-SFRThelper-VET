@@ -316,6 +316,7 @@ namespace MAAS_SFRThelper.ViewModels
         private readonly EsapiWorker _esapiWorker;
         //private ScriptContext scriptContext;
         public DelegateCommand CreateLatticeCommand { get; set; }
+        public DelegateCommand RunPostProcessCommand { get; set; }
 
         #endregion
 
@@ -347,6 +348,7 @@ namespace MAAS_SFRThelper.ViewModels
             SingleSphereEnabled = true;
             LateralScalingFactor = 1.0;
             CreateLatticeCommand = new DelegateCommand(CreateLattice, CanCreateLattice);
+            RunPostProcessCommand = new DelegateCommand(LatticePostProcess);
             LSFVisibility = true;
 
             double.TryParse(AppConfig.GetValueByKey("TumourEdgeBuffer_mm"), NumberStyles.Any, CultureInfo.InvariantCulture, out tumourEdgeBuffer);
@@ -1631,16 +1633,12 @@ namespace MAAS_SFRThelper.ViewModels
             // Build spheres
             BuildSpheres(true);
 
-            // Post process lattice to generate boost and helper volumes
-            if (OverwriteStructures)
-            {
-                LatticePostProcess();
-            }
+
         }
 
         private void LatticePostProcess()
         {
-            _esapiWorker.RunWithWait(sc =>
+            _esapiWorker.Run(sc =>
             {
                 var ss = sc.StructureSet;
                 var ptv20 = ss.Structures.FirstOrDefault(s => s.Id.Equals("PTV20", StringComparison.OrdinalIgnoreCase));

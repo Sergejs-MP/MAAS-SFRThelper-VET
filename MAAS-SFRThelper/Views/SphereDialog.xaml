@@ -24,6 +24,7 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
 
         </Grid.RowDefinitions>
@@ -104,9 +105,12 @@
         <Label Grid.Row="6" Grid.Column="2" Height="26" Margin="10" Content="Outer Ring (mm)" />
         <TextBox Grid.Row="6" Grid.Column="3" Text="{Binding OuterRing}" Height="26" Margin="10" Width="123" />
         <CheckBox Grid.Row="6" Grid.ColumnSpan="4" Margin="10" Content="Overwrite existing" IsChecked="{Binding OverwriteStructures}" HorizontalAlignment="Left" />
-        <ProgressBar Grid.Row="7" Margin="10" Maximum="100" Minimum="0" Value="{Binding ProgressValue}"
+
+        <Button Grid.Row="7" Grid.ColumnSpan="4" Height="26" Margin="10" Content="Generate Helpers" Command="{Binding RunPostProcessCommand}" />
+
+        <ProgressBar Grid.Row="8" Margin="10" Maximum="100" Minimum="0" Value="{Binding ProgressValue}"
                      Grid.ColumnSpan="4" Height="20"/>
-        <TextBlock Grid.Row ="8" Grid.ColumnSpan="4" Margin="10" Text="{Binding Output}">
+        <TextBlock Grid.Row ="9" Grid.ColumnSpan="4" Margin="10" Text="{Binding Output}">
 
                 </TextBlock>
         </Grid>

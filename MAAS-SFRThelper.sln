@@ -66,7 +66,6 @@ Global
                 {5941A5A3-F51B-4C82-8CDC-F2747B230D20}.Release|x86.ActiveCfg = Release|Any CPU
                 {5941A5A3-F51B-4C82-8CDC-F2747B230D20}.Release|x86.Build.0 = Release|Any CPU
         EndGlobalSection
-
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
