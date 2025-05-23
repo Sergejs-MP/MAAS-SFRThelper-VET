@@ -819,7 +819,7 @@ namespace MAAS_SFRThelper.ViewModels
             // Matt email 7/15/24
             // https://github.com/VarianAPIs/Varian-Code-Samples/blob/master/webinars%20%26%20workshops/06%20Apr%202018%20Webinar/Eclipse%20Scripting%20API/Projects/CreateOptStructures/CreateOptStructures.cs
 
-            _esapiWorker.Run(sc =>
+            _esapiWorker.RunWithWait(sc =>
             {
                 // Retrieve the structure set from the plan
                 var plan = sc.PlanSetup;

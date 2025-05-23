@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
-VisualStudioVersion = 17.13.35828.75 d17.13
+VisualStudioVersion = 17.13.35828.75
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MAAS-SFRThelper", "MAAS-SFRThelper\MAAS-SFRThelper.csproj", "{2FC15AB5-D196-45CB-AD50-CF6B7C7AB038}"
 EndProject
@@ -66,6 +66,7 @@ Global
                 {5941A5A3-F51B-4C82-8CDC-F2747B230D20}.Release|x86.ActiveCfg = Release|Any CPU
                 {5941A5A3-F51B-4C82-8CDC-F2747B230D20}.Release|x86.Build.0 = Release|Any CPU
         EndGlobalSection
+
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
