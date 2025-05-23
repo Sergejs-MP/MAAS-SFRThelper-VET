@@ -14,7 +14,6 @@ using System.Windows.Threading;
 using VMS.TPS.Common.Model.API;
 
 using System.Windows.Media.Imaging;
-using MAAS.Common.EulaVerification;
 
 namespace VMS.TPS
 {
@@ -57,47 +56,9 @@ namespace VMS.TPS
 
                 // Set up the EulaConfig directory
                 string scriptDirectory = Path.GetDirectoryName(scriptPath);
-                EulaConfig.ConfigDirectory = scriptDirectory;
 
                 // EULA verification
-                var eulaVerifier = new EulaVerifier(PROJECT_NAME, PROJECT_VERSION, LICENSE_URL);
-                var eulaConfig = EulaConfig.Load(PROJECT_NAME);
-                if (eulaConfig.Settings == null)
-                {
-                    eulaConfig.Settings = new ApplicationSettings();
-                }
 
-                if (!eulaVerifier.IsEulaAccepted())
-                {
-                    MessageBox.Show(
-                        $"This version of {PROJECT_NAME} (v{PROJECT_VERSION}) requires license acceptance before first use.\n\n" +
-                        "You will be prompted to provide an access code. Please follow the instructions to obtain your code.",
-                        "License Acceptance Required",
-                        MessageBoxButton.OK,
-                        MessageBoxImage.Information);
-
-                    BitmapImage qrCode = null;
-                    try
-                    {
-                        string assemblyName = Assembly.GetExecutingAssembly().GetName().Name;
-                        qrCode = new BitmapImage(new Uri($"pack://application:,,,/{assemblyName};component/Resources/qrcode.bmp"));
-                    }
-                    catch (Exception ex)
-                    {
-                        System.Diagnostics.Debug.WriteLine($"Error loading QR code: {ex.Message}");
-                    }
-
-                    if (!eulaVerifier.ShowEulaDialog(qrCode))
-                    {
-                        MessageBox.Show(
-                            "License acceptance is required to use this application.\n\n" +
-                            "The application will now close.",
-                            "License Not Accepted",
-                            MessageBoxButton.OK,
-                            MessageBoxImage.Warning);
-                        return;
-                    }
-                }
 
                 // Check if patient/plan is selected
                 if (context.Patient == null || context.PlanSetup == null)
@@ -120,42 +81,10 @@ namespace VMS.TPS
                 // Check if we have a valid expiration date and if the app is expired
                 if (asmCa != null && asmCa.ConstructorArguments.Count > 0)
                 {
-                    DateTime endDate;
-                    if (DateTime.TryParse(asmCa.ConstructorArguments.FirstOrDefault().Value as string, provider, DateTimeStyles.None, out endDate)
-                        && (DateTime.Now <= endDate || foundNoExpire))
+                    DateTime endDate = DateTime.MaxValue;
+                    if (DateTime.Now <= endDate )
                     {
                         // Display opening msg based on validation status
-                        string msg;
-
-                        if (!eulaConfig.Settings.Validated)
-                        {
-                            // First-time message
-                            msg = $"The current MAAS-SFRThelper application is provided AS IS as a non-clinical, research only tool in evaluation only. The current " +
-                            $"application will only be available until {endDate.Date} after which the application will be unavailable. " +
-                            $"By Clicking 'Yes' you agree that this application will be evaluated and not utilized in providing planning decision support\n\n" +
-                            $"Newer builds with future expiration dates can be found here: {GITHUB_URL}\n\n" +
-                            "See the FAQ for more information on how to remove this pop-up and expiration";
-                        }
-                        else
-                        {
-                            // Returning user message
-                            msg = $"Application will only be available until {endDate.Date} after which the application will be unavailable. " +
-                            "By Clicking 'Yes' you agree that this application will be evaluated and not utilized in providing planning decision support\n\n" +
-                            $"Newer builds with future expiration dates can be found here: {GITHUB_URL} \n\n" +
-                            "See the FAQ for more information on how to remove this pop-up and expiration";
-                        }
-
-                        if (!foundNoExpire)
-                        {
-                            bool userAgree = MessageBox.Show(msg,
-                                                            "MAAS-SFRTHelper",
-                                                            MessageBoxButton.YesNo,
-                                                            MessageBoxImage.Question) == MessageBoxResult.Yes;
-                            if (!userAgree)
-                            {
-                                return;
-                            }
-                        }
 
                         try
                         {
