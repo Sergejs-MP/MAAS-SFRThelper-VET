@@ -32,6 +32,7 @@ Features
   * not currently supported with CVT3D
 * Post processing via the **Generate Helpers** button creates `PTV_6670` and optimisation rings from `LAT_PEAKS`
 
+
 Features planned
 * display volume of selected target in lower console output
 * display total sphere volume and % (divided by target volume) in Message Box (and console) with OK/cancel option 

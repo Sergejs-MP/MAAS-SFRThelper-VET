@@ -382,7 +382,7 @@ namespace MAAS_SFRThelper.ViewModels
 
         private void SetStructures()
         {
-            _esapiWorker.Run(sc =>
+            _esapiWorker.RunWithWait(sc =>
             {
                 //consider removing plantargetid as its not used in the following loop. (stays null)
                 string planTargetId = null;
@@ -821,7 +821,7 @@ namespace MAAS_SFRThelper.ViewModels
             // Matt email 7/15/24
             // https://github.com/VarianAPIs/Varian-Code-Samples/blob/master/webinars%20%26%20workshops/06%20Apr%202018%20Webinar/Eclipse%20Scripting%20API/Projects/CreateOptStructures/CreateOptStructures.cs
 
-            _esapiWorker.Run(sc =>
+            _esapiWorker.RunWithWait(sc =>
             {
                 // Retrieve the structure set from the plan
                 var plan = sc.PlanSetup;
@@ -1397,6 +1397,17 @@ namespace MAAS_SFRThelper.ViewModels
                     sc.StructureSet.RemoveStructure(ptvRetract);
                     sc.StructureSet.RemoveStructure(ptvRetractVoid);
                 }
+
+                // Standardize names for post processing
+                var selPtv = structureSet.Structures.FirstOrDefault(x => x.Id == target_name);
+                if (selPtv != null && !selPtv.Id.Equals("PTV20", StringComparison.OrdinalIgnoreCase))
+                {
+                    selPtv = RenameOrOverwrite(structureSet, selPtv, "PTV20", selPtv.DicomType);
+                }
+                if (structMain != null && !structMain.Id.Equals("LAT_PEAKS", StringComparison.OrdinalIgnoreCase))
+                {
+                    structMain = RenameOrOverwrite(structureSet, structMain, "LAT_PEAKS", "PTV");
+                }
             });
             // And the main structure with target
             // Output += "\nCreated spheres. Please close the tool to view";
@@ -1621,6 +1632,7 @@ namespace MAAS_SFRThelper.ViewModels
 
             // Build spheres
             BuildSpheres(true);
+
 
         }
 
