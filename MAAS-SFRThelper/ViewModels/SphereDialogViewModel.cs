@@ -380,7 +380,7 @@ namespace MAAS_SFRThelper.ViewModels
 
         private void SetStructures()
         {
-            _esapiWorker.Run(sc =>
+            _esapiWorker.RunWithWait(sc =>
             {
                 //consider removing plantargetid as its not used in the following loop. (stays null)
                 string planTargetId = null;
@@ -1395,6 +1395,17 @@ namespace MAAS_SFRThelper.ViewModels
                     sc.StructureSet.RemoveStructure(ptvRetract);
                     sc.StructureSet.RemoveStructure(ptvRetractVoid);
                 }
+
+                // Standardize names for post processing
+                var selPtv = structureSet.Structures.FirstOrDefault(x => x.Id == target_name);
+                if (selPtv != null && !selPtv.Id.Equals("PTV20", StringComparison.OrdinalIgnoreCase))
+                {
+                    selPtv = RenameOrOverwrite(structureSet, selPtv, "PTV20", selPtv.DicomType);
+                }
+                if (structMain != null && !structMain.Id.Equals("LAT_PEAKS", StringComparison.OrdinalIgnoreCase))
+                {
+                    structMain = RenameOrOverwrite(structureSet, structMain, "LAT_PEAKS", "PTV");
+                }
             });
             // And the main structure with target
             // Output += "\nCreated spheres. Please close the tool to view";
@@ -1621,12 +1632,15 @@ namespace MAAS_SFRThelper.ViewModels
             BuildSpheres(true);
 
             // Post process lattice to generate boost and helper volumes
-            LatticePostProcess();
+            if (OverwriteStructures)
+            {
+                LatticePostProcess();
+            }
         }
 
         private void LatticePostProcess()
         {
-            _esapiWorker.Run(sc =>
+            _esapiWorker.RunWithWait(sc =>
             {
                 var ss = sc.StructureSet;
                 var ptv20 = ss.Structures.FirstOrDefault(s => s.Id.Equals("PTV20", StringComparison.OrdinalIgnoreCase));
