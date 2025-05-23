@@ -30,6 +30,7 @@ Features
   * example: 2 = 2x the spacing between spheres laterally, vs spacing in the head to foot direction
   * larger lateral spacing could increase peak to valley ratio in coplanar VMAT delivery
   * not currently supported with CVT3D
+* Automated post processing generates `PTV_6670` and optimisation rings from `LAT_PEAKS`
 
 Features planned
 * display volume of selected target in lower console output
