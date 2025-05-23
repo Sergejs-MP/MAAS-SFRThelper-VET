@@ -20,6 +20,7 @@ using MAAS_SFRThelper.Services;
 using System.Windows.Interop;
 using System.Windows.Media.Media3D;
 using System.Security.Policy;
+using System.Globalization;
 
 namespace MAAS_SFRThelper.ViewModels
 {
@@ -180,6 +181,41 @@ namespace MAAS_SFRThelper.ViewModels
             set { SetProperty(ref yShift, value); }
         }
 
+        private double tumourEdgeBuffer;
+        public double TumourEdgeBuffer
+        {
+            get { return tumourEdgeBuffer; }
+            set { SetProperty(ref tumourEdgeBuffer, value); }
+        }
+
+        private double oarBuffer;
+        public double OARBuffer
+        {
+            get { return oarBuffer; }
+            set { SetProperty(ref oarBuffer, value); }
+        }
+
+        private double boostShell;
+        public double BoostShell
+        {
+            get { return boostShell; }
+            set { SetProperty(ref boostShell, value); }
+        }
+
+        private double outerRing;
+        public double OuterRing
+        {
+            get { return outerRing; }
+            set { SetProperty(ref outerRing, value); }
+        }
+
+        private bool overwriteStructures;
+        public bool OverwriteStructures
+        {
+            get { return overwriteStructures; }
+            set { SetProperty(ref overwriteStructures, value); }
+        }
+
         private float radius;
         public float Radius
         {
@@ -312,6 +348,16 @@ namespace MAAS_SFRThelper.ViewModels
             LateralScalingFactor = 1.0;
             CreateLatticeCommand = new DelegateCommand(CreateLattice, CanCreateLattice);
             LSFVisibility = true;
+
+            double.TryParse(AppConfig.GetValueByKey("TumourEdgeBuffer_mm"), NumberStyles.Any, CultureInfo.InvariantCulture, out tumourEdgeBuffer);
+            if (tumourEdgeBuffer == 0) tumourEdgeBuffer = 5;
+            double.TryParse(AppConfig.GetValueByKey("OARBuffer_mm"), NumberStyles.Any, CultureInfo.InvariantCulture, out oarBuffer);
+            if (oarBuffer == 0) oarBuffer = 15;
+            double.TryParse(AppConfig.GetValueByKey("BoostShell_mm"), NumberStyles.Any, CultureInfo.InvariantCulture, out boostShell);
+            if (boostShell == 0) boostShell = 2;
+            double.TryParse(AppConfig.GetValueByKey("OuterRing_mm"), NumberStyles.Any, CultureInfo.InvariantCulture, out outerRing);
+            if (outerRing == 0) outerRing = 10;
+            OverwriteStructures = true;
 
             // Set valid spacings based on CT img z resolution
             // ValidSpacings = new List<Spacing>();
@@ -773,7 +819,7 @@ namespace MAAS_SFRThelper.ViewModels
             // Matt email 7/15/24
             // https://github.com/VarianAPIs/Varian-Code-Samples/blob/master/webinars%20%26%20workshops/06%20Apr%202018%20Webinar/Eclipse%20Scripting%20API/Projects/CreateOptStructures/CreateOptStructures.cs
 
-            _esapiWorker.Run(sc =>
+            _esapiWorker.RunWithWait(sc =>
             {
                 // Retrieve the structure set from the plan
                 var plan = sc.PlanSetup;
@@ -1573,6 +1619,112 @@ namespace MAAS_SFRThelper.ViewModels
 
             // Build spheres
             BuildSpheres(true);
+
+            // Post process lattice to generate boost and helper volumes
+            LatticePostProcess();
+        }
+
+        private void LatticePostProcess()
+        {
+            _esapiWorker.Run(sc =>
+            {
+                var ss = sc.StructureSet;
+                var ptv20 = ss.Structures.FirstOrDefault(s => s.Id.Equals("PTV20", StringComparison.OrdinalIgnoreCase));
+                var peaks = ss.Structures.FirstOrDefault(s => s.Id.Equals("LAT_PEAKS", StringComparison.OrdinalIgnoreCase));
+                if (ptv20 == null || peaks == null)
+                {
+                    MessageBox.Show("Required structures PTV20 or LAT_PEAKS not found.");
+                    return;
+                }
+
+                var hull = ss.AddStructure("CONTROL", "tmp_hull");
+                hull.SegmentVolume = ptv20.Margin(-tumourEdgeBuffer);
+
+                var ptvTmp = ss.AddStructure("CONTROL", "ptv6670_tmp");
+                ptvTmp.SegmentVolume = peaks.And(hull);
+
+                if (peaks.Volume > 0 && ptvTmp.Volume / peaks.Volume < 0.8)
+                {
+                    MessageBox.Show("Peaks near surface were cropped");
+                }
+
+                ss.RemoveStructure(hull);
+
+                foreach (var oar in ss.Structures.Where(o => o.DicomType == "OAR"))
+                {
+                    if (MinSurfaceDistance(ptvTmp, oar) < oarBuffer)
+                    {
+                        var oarMargin = ss.AddStructure("CONTROL", "tmp_oar");
+                        oarMargin.SegmentVolume = oar.Margin(oarBuffer);
+                        ptvTmp.SegmentVolume = ptvTmp.Sub(oarMargin);
+                        ss.RemoveStructure(oarMargin);
+                    }
+                }
+
+                if (ptvTmp.Volume == 0)
+                {
+                    MessageBox.Show("No safe peaks remain");
+                    ss.RemoveStructure(ptvTmp);
+                    return;
+                }
+
+                var ptv6670 = RenameOrOverwrite(ss, ptvTmp, "PTV_6670", "PTV");
+
+                var ptv20Opt = ss.AddStructure("CONTROL", "tmp_ptv20_opt");
+                ptv20Opt.SegmentVolume = ptv20.Sub(ptv6670.Margin(boostShell));
+                RenameOrOverwrite(ss, ptv20Opt, "PTV20_opt", "CONTROL");
+
+                var peakShell = ss.AddStructure("CONTROL", "tmp_peak_shell");
+                peakShell.SegmentVolume = ptv6670.Margin(boostShell).Sub(ptv6670);
+                RenameOrOverwrite(ss, peakShell, "Ring_PeakShell", "CONTROL");
+
+                var ptvOuter = ss.AddStructure("CONTROL", "tmp_ptv_outer");
+                ptvOuter.SegmentVolume = ptv20.Margin(outerRing).Sub(ptv20);
+                RenameOrOverwrite(ss, ptvOuter, "Ring_PTVOuter", "CONTROL");
+
+                var ptvAvoid = ss.AddStructure("CONTROL", "tmp_ptv_avoid");
+                ptvAvoid.SegmentVolume = ptv20.Sub(ptv6670);
+                RenameOrOverwrite(ss, ptvAvoid, "PTV_Avoid", "CONTROL");
+
+            });
+        }
+
+        private double MinSurfaceDistance(Structure a, Structure b)
+        {
+            double min = double.MaxValue;
+            foreach (var pa in a.MeshGeometry.Positions)
+            {
+                foreach (var pb in b.MeshGeometry.Positions)
+                {
+                    var dx = pa.X - pb.X;
+                    var dy = pa.Y - pb.Y;
+                    var dz = pa.Z - pb.Z;
+                    var dist = Math.Sqrt(dx * dx + dy * dy + dz * dz);
+                    if (dist < min) min = dist;
+                }
+            }
+            return min;
+        }
+
+        private Structure RenameOrOverwrite(StructureSet ss, Structure roi, string id, string dicomType)
+        {
+            var existing = ss.Structures.FirstOrDefault(s => s.Id.Equals(id, StringComparison.OrdinalIgnoreCase));
+            if (existing != null)
+            {
+                if (OverwriteStructures)
+                {
+                    ss.RemoveStructure(existing);
+                }
+                else
+                {
+                    return existing;
+                }
+            }
+
+            var newStruct = ss.AddStructure(dicomType, id);
+            newStruct.SegmentVolume = roi.SegmentVolume;
+            ss.RemoveStructure(roi);
+            return newStruct;
         }
     }
 }
