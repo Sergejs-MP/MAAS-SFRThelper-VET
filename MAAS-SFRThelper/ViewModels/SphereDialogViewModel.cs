@@ -21,6 +21,7 @@ using System.Windows.Interop;
 using System.Windows.Media.Media3D;
 using System.Security.Policy;
 using System.Globalization;
+using System.Threading.Tasks;
 
 namespace MAAS_SFRThelper.ViewModels
 {
@@ -47,6 +48,13 @@ namespace MAAS_SFRThelper.ViewModels
 
                 }
             }
+        }
+
+        private bool _isWorking = false;
+        public bool IsWorking
+        {
+            get { return _isWorking; }
+            set { SetProperty(ref _isWorking, value); }
         }
 
         private bool _patternEnabled;
@@ -398,6 +406,7 @@ namespace MAAS_SFRThelper.ViewModels
 
         private bool CanCreateLattice()
         {
+            if(IsWorking) return false; // Prevent multiple clicks
             if (radius == 0)
             {
                 LatticeValidationText = "Please set radius.";
@@ -820,8 +829,8 @@ namespace MAAS_SFRThelper.ViewModels
             // Make a new structure
             // Matt email 7/15/24
             // https://github.com/VarianAPIs/Varian-Code-Samples/blob/master/webinars%20%26%20workshops/06%20Apr%202018%20Webinar/Eclipse%20Scripting%20API/Projects/CreateOptStructures/CreateOptStructures.cs
-
-            _esapiWorker.RunWithWait(sc =>
+            IsWorking = true;
+            _esapiWorker.Run(sc =>
             {
                 // Retrieve the structure set from the plan
                 var plan = sc.PlanSetup;
@@ -1412,7 +1421,7 @@ namespace MAAS_SFRThelper.ViewModels
             // And the main structure with target
             // Output += "\nCreated spheres. Please close the tool to view";
             //MessageBox.Show("Created spheres close tool to view. \nFor different sphere locations rerun with different x and y shift values.");
-
+            IsWorking = false;
         }
 
         private bool isPointInsideBBox(Rect3D bbox, VVector point)
@@ -1636,90 +1645,312 @@ namespace MAAS_SFRThelper.ViewModels
 
         }
 
+        public static int _GetSlice(double z, StructureSet SS)
+        {
+            var imageRes = SS.Image.ZRes;
+            return Convert.ToInt32((z - SS.Image.Origin.z) / imageRes);
+        }
+
+        
+        public static List<(VVector[] contour, int slice)> BufferContourData(Structure str, StructureSet structureSet, IProgress<int> progress = null)
+        {
+            if (str == null) throw new ArgumentNullException(nameof(str));
+            if (structureSet == null) throw new ArgumentNullException(nameof(structureSet));
+
+            
+
+            var contourList = new List<(VVector[] contour, int slice)>();
+            var mesh = str.MeshGeometry.Bounds;
+            var meshLow = _GetSlice(mesh.Z, structureSet);
+            var meshUp = _GetSlice(mesh.Z + mesh.SizeZ, structureSet) + 1;
+
+            int startSlice = meshLow;
+            int endSlice = meshUp;
+            int totalSlices = endSlice - startSlice + 1;
+            int processedSlices = 0;
+
+            for (int j = startSlice; j <= endSlice; j++)
+            {
+                var contours = str.GetContoursOnImagePlane(j);
+                if (contours.Length > 0)
+                {
+                    for (int i = 0; i < contours.GetLength(0); i++)
+                    {
+                        contourList.Add((contours[i], j));
+                    }
+                }
+
+                // Report progress
+                processedSlices++;
+                progress?.Report((int)(((double)processedSlices / totalSlices) * 100));
+            }
+
+            return contourList;
+        }
+
+        public static void ProcessStructure(Structure str, StructureSet structureSet, Structure tmpSTR)
+        {
+
+            if (str == null) throw new ArgumentNullException(nameof(str));
+            if (structureSet == null) throw new ArgumentNullException(nameof(structureSet));
+            if (tmpSTR == null) throw new ArgumentNullException(nameof(tmpSTR));
+
+            var contourDataList = BufferContourData(str, structureSet);
+
+
+
+            // Ensure this runs on the main thread if needed
+            foreach (var (contour, slice) in contourDataList)
+            {
+                tmpSTR.AddContourOnImagePlane(contour, slice);
+            }
+
+            tmpSTR.Color = str.Color;
+
+
+        }
+
         private void LatticePostProcess()
         {
+            Output += "\nLattice post-processing started.";
+            ProgressValue = 0.0;
             _esapiWorker.Run(sc =>
             {
                 var ss = sc.StructureSet;
                 var ptv20 = ss.Structures.FirstOrDefault(s => s.Id.Equals("PTV20", StringComparison.OrdinalIgnoreCase));
                 var peaks = ss.Structures.FirstOrDefault(s => s.Id.Equals("LAT_PEAKS", StringComparison.OrdinalIgnoreCase));
+
                 if (ptv20 == null || peaks == null)
                 {
                     MessageBox.Show("Required structures PTV20 or LAT_PEAKS not found.");
                     return;
                 }
 
+
+
+                var tmpPtv20 = ss.AddStructure("CONTROL", "tmp_ptv20");
+                tmpPtv20.ConvertToHighResolution();
+                if(ptv20.IsHighResolution)
+                    tmpPtv20.SegmentVolume = ptv20.SegmentVolume;
+                else
+                ProcessStructure(ptv20, ss, tmpPtv20);
+
                 var hull = ss.AddStructure("CONTROL", "tmp_hull");
-                hull.SegmentVolume = ptv20.Margin(-tumourEdgeBuffer);
+                hull.ConvertToHighResolution();
+                hull.SegmentVolume = tmpPtv20.Margin(-tumourEdgeBuffer);
+
 
                 var ptvTmp = ss.AddStructure("CONTROL", "ptv6670_tmp");
-                ptvTmp.SegmentVolume = peaks.And(hull);
+                ptvTmp.ConvertToHighResolution();
+                    ptvTmp.SegmentVolume = peaks.SegmentVolume.And(hull.SegmentVolume);
 
-                if (peaks.Volume > 0 && ptvTmp.Volume / peaks.Volume < 0.8)
+                ProgressValue += 25.0;
+                if (peaks.Volume > 0 && ptvTmp.Volume / peaks.Volume < 1.0)
                 {
-                    MessageBox.Show("Peaks near surface were cropped");
+                    Output += ($"\nCropepd to original Ratio: {Math.Round(ptvTmp.Volume / peaks.Volume,3)} ","Peaks near surface were cropped");
                 }
+                else if  (ptvTmp.IsEmpty || ptvTmp.Volume == 0) 
+                { 
+                    MessageBox.Show("No Peaks Remained","Cannot Cleanup", MessageBoxButton.OK,MessageBoxImage.Stop);
+                    ss.RemoveStructure(ptvTmp);
+                    ss.RemoveStructure(hull);
+                    ss.RemoveStructure(tmpPtv20);
+                }
+
 
                 ss.RemoveStructure(hull);
 
-                foreach (var oar in ss.Structures.Where(o => o.DicomType == "OAR"))
+
+                var oarsHighRes = ss.AddStructure("CONTROL", "tmpAllOARSHiR");
+                oarsHighRes.ConvertToHighResolution();
+                var oarsDefRes = ss.AddStructure("CONTROL", "tmpAllOARSDefR");
+
+                foreach (var oar in ss.Structures.Where(o => o.DicomType == "ORGAN"))
                 {
-                    if (MinSurfaceDistance(ptvTmp, oar) < oarBuffer)
+                    
+                    double dist = MinSurfaceDistance(ptvTmp, oar);
+                    if (dist < oarBuffer)
                     {
-                        var oarMargin = ss.AddStructure("CONTROL", "tmp_oar");
-                        oarMargin.SegmentVolume = oar.Margin(oarBuffer);
-                        ptvTmp.SegmentVolume = ptvTmp.Sub(oarMargin);
-                        ss.RemoveStructure(oarMargin);
+                        if(oar.IsHighResolution)
+                            oarsHighRes.SegmentVolume = oarsHighRes.SegmentVolume.Or(oar.SegmentVolume);
+                        else
+                            oarsDefRes.SegmentVolume = oarsDefRes.SegmentVolume.Or(oar.SegmentVolume);
                     }
                 }
 
+                ProgressValue += 25.0;
+
+                var oars = ss.AddStructure("CONTROL", "tmpAllOARS");
+                oars.ConvertToHighResolution();
+                if (!oarsHighRes.IsEmpty )
+                {
+                    oars.SegmentVolume = oarsHighRes.SegmentVolume;
+                }
+                ProcessStructure(oarsDefRes, ss, oars);
+
+                var oarMargin = ss.AddStructure("CONTROL", "tmp_oar");
+                oarMargin.ConvertToHighResolution();
+
+                CopyStructureWithinZWindow(oars, ptvTmp, ss, oarMargin, oarBuffer, 0.2, new Progress<int>(p => ProgressValue += p / 2));
+
+                ProgressValue += 25.0;
+
+                oarMargin.SegmentVolume = oarMargin.Margin(oarBuffer);
+                ptvTmp.SegmentVolume = ptvTmp.Sub(oarMargin);
+
+                ss.RemoveStructure(oarMargin);
+
                 if (ptvTmp.Volume == 0)
                 {
-                    MessageBox.Show("No safe peaks remain");
+                    MessageBox.Show("No PTV667 was created", "No safe peaks remain");
                     ss.RemoveStructure(ptvTmp);
                     return;
                 }
 
                 var ptv6670 = RenameOrOverwrite(ss, ptvTmp, "PTV_6670", "PTV");
 
+
+
                 var ptv20Opt = ss.AddStructure("CONTROL", "tmp_ptv20_opt");
-                ptv20Opt.SegmentVolume = ptv20.Sub(ptv6670.Margin(boostShell));
+                ptv20Opt.ConvertToHighResolution();
+                ptv20Opt.SegmentVolume = tmpPtv20.Sub(ptv6670.Margin(boostShell));
                 RenameOrOverwrite(ss, ptv20Opt, "PTV20_opt", "CONTROL");
 
                 var peakShell = ss.AddStructure("CONTROL", "tmp_peak_shell");
+                peakShell.ConvertToHighResolution();
                 peakShell.SegmentVolume = ptv6670.Margin(boostShell).Sub(ptv6670);
                 RenameOrOverwrite(ss, peakShell, "Ring_PeakShell", "CONTROL");
 
                 var ptvOuter = ss.AddStructure("CONTROL", "tmp_ptv_outer");
-                ptvOuter.SegmentVolume = ptv20.Margin(outerRing).Sub(ptv20);
+                ptvOuter.ConvertToHighResolution(); 
+                ptvOuter.SegmentVolume = tmpPtv20.Margin(outerRing).Sub(tmpPtv20);
                 RenameOrOverwrite(ss, ptvOuter, "Ring_PTVOuter", "CONTROL");
 
+
                 var ptvAvoid = ss.AddStructure("CONTROL", "tmp_ptv_avoid");
-                ptvAvoid.SegmentVolume = ptv20.Sub(ptv6670);
+                ptvAvoid.ConvertToHighResolution(); 
+                ptvAvoid.SegmentVolume = tmpPtv20.Sub(ptv6670);
                 RenameOrOverwrite(ss, ptvAvoid, "PTV_Avoid", "CONTROL");
+
+                ss.RemoveStructure(tmpPtv20);
+                Task.Run(() =>
+                Output += "\nLattice post-processing completed.");
+                ProgressValue = 100.0;
 
             });
         }
 
         private double MinSurfaceDistance(Structure a, Structure b)
         {
-            double min = double.MaxValue;
-            foreach (var pa in a.MeshGeometry.Positions)
-            {
-                foreach (var pb in b.MeshGeometry.Positions)
+            // 1️⃣ Pull the data out while you’re still on the ESAPI thread
+            var ptsA = a.MeshGeometry.Positions.ToArray();   // Point3D[]
+            var ptsB = b.MeshGeometry.Positions.ToArray();
+            double minSq = double.MaxValue;
+            object gate = new object();
+
+            Parallel.For(0, ptsA.Length, () => double.MaxValue,
+                (i, state, localMin) =>
                 {
-                    var dx = pa.X - pb.X;
-                    var dy = pa.Y - pb.Y;
-                    var dz = pa.Z - pb.Z;
-                    var dist = Math.Sqrt(dx * dx + dy * dy + dz * dz);
-                    if (dist < min) min = dist;
+                    var pa = ptsA[i];
+                    for (int j = 0; j < ptsB.Length; j++)
+                    {
+                        var pb = ptsB[j];
+                        var dx = pa.X - pb.X; var dy = pa.Y - pb.Y; var dz = pa.Z - pb.Z;
+                        double dSq = dx * dx + dy * dy + dz * dz;
+                        if (dSq < localMin)
+                        {
+                            localMin = dSq;
+                            if (localMin == 0) break;          // early exit inner loop
+                        }
+                    }
+                    return localMin;
+                },
+                localMin =>
+                {
+                    lock (gate) if (localMin < minSq) minSq = localMin;
+                });
+
+            return Math.Sqrt(minSq);
+        }
+
+        /// <summary>
+        /// Copies the parts of <paramref name="source"/> that lie on image planes
+        /// whose z-position is inside the (referenceBounds  ±  margin  ±  %-padding)
+        /// and adds them to <paramref name="target"/>.
+        /// </summary>
+        /// <param name="source">Structure you want to crop/copy (e.g. Lung-CTV).</param>
+        /// <param name="reference">Reference structure that defines the axial window (e.g. PTV).</param>
+        /// <param name="ss">Containing StructureSet.</param>
+        /// <param name="target">Destination structure that will receive the contours.</param>
+        /// <param name="marginMm">
+        /// Symmetric isotropic margin (mm) that is added below zMin and above zMax
+        /// before the %-padding is applied.  Use 0 for none.
+        /// </param>
+        /// <param name="percentPadding">
+        /// Additional symmetric padding expressed as a *fraction* (0.20 = 20 %) of the
+        /// final width after the margin is applied.
+        /// </param>
+        public static void CopyStructureWithinZWindow(
+            Structure source,
+            Structure reference,
+            StructureSet ss,
+            Structure target,
+            double marginMm = 0.0,
+            double percentPadding = 0.0,
+            IProgress<int> progress = null)
+        {
+            if (source == null) throw new ArgumentNullException(nameof(source));
+            if (reference == null) throw new ArgumentNullException(nameof(reference));
+            if (ss == null) throw new ArgumentNullException(nameof(ss));
+            if (target == null) throw new ArgumentNullException(nameof(target));
+
+            //---------------------------------------------
+            // 1.  Determine axial window in *millimetres*
+            //---------------------------------------------
+            var refBounds = reference.MeshGeometry.Bounds;      // ESAPI: in patient coords
+            double zMin = refBounds.Z - marginMm;               // lower edge
+            double zMax = refBounds.Z + refBounds.SizeZ + marginMm; // upper edge
+
+            // Add symmetric %-padding (e.g. 0.20 = ±20 %)
+            double pad = (zMax - zMin) * percentPadding;
+            zMin -= pad;
+            zMax += pad;
+
+            //---------------------------------------------
+            // 2.  Convert to slice indices (inclusive)
+            //---------------------------------------------
+            int firstSlice = Math.Max(0, _GetSlice(zMin, ss));
+            int lastSlice = Math.Min(ss.Image.ZSize - 1, _GetSlice(zMax, ss));
+
+            //---------------------------------------------
+            // 3.  Copy only the contours that fall in-range
+            //---------------------------------------------
+            int totalSlices = lastSlice - firstSlice + 1;
+            int processed = 0;
+
+            for (int slice = firstSlice; slice <= lastSlice; slice++)
+            {
+                var contours = source.GetContoursOnImagePlane(slice);
+                if (contours.Length == 0)
+                {
+                    processed++;
+                    progress?.Report((int)(100.0 * processed / totalSlices));
+                    continue;
                 }
+
+                foreach (var contour in contours)
+                    target.AddContourOnImagePlane(contour, slice);
+
+                processed++;
+                progress?.Report((int)(100.0 * processed / totalSlices));
             }
-            return min;
+
+            target.Color = source.Color;  // keep the same colour if you like
         }
 
         private Structure RenameOrOverwrite(StructureSet ss, Structure roi, string id, string dicomType)
         {
+
             var existing = ss.Structures.FirstOrDefault(s => s.Id.Equals(id, StringComparison.OrdinalIgnoreCase));
             if (existing != null)
             {
@@ -1734,8 +1965,13 @@ namespace MAAS_SFRThelper.ViewModels
             }
 
             var newStruct = ss.AddStructure(dicomType, id);
-            newStruct.SegmentVolume = roi.SegmentVolume;
+            newStruct.ConvertToHighResolution();
+            if (roi.IsHighResolution)
+                newStruct.SegmentVolume = roi.SegmentVolume;
+            else
+                ProcessStructure(roi, ss, newStruct);
             ss.RemoveStructure(roi);
+
             return newStruct;
         }
     }
