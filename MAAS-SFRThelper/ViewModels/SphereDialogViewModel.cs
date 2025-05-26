@@ -224,6 +224,13 @@ namespace MAAS_SFRThelper.ViewModels
             set { SetProperty(ref overwriteStructures, value); }
         }
 
+        private bool removeWholePeaks;
+        public bool RemoveWholePeaks
+        {
+            get { return removeWholePeaks; }
+            set { SetProperty(ref removeWholePeaks, value); }
+        }
+
         private float radius;
         public float Radius
         {
@@ -368,6 +375,7 @@ namespace MAAS_SFRThelper.ViewModels
             double.TryParse(AppConfig.GetValueByKey("OuterRing_mm"), NumberStyles.Any, CultureInfo.InvariantCulture, out outerRing);
             if (outerRing == 0) outerRing = 10;
             OverwriteStructures = true;
+            RemoveWholePeaks = false;
 
             // Set valid spacings based on CT img z resolution
             // ValidSpacings = new List<Spacing>();
@@ -1411,7 +1419,7 @@ namespace MAAS_SFRThelper.ViewModels
                 var selPtv = structureSet.Structures.FirstOrDefault(x => x.Id == target_name);
                 if (selPtv != null && !selPtv.Id.Equals("PTV20", StringComparison.OrdinalIgnoreCase))
                 {
-                    selPtv = RenameOrOverwrite(structureSet, selPtv, "PTV20", selPtv.DicomType);
+                    selPtv = RenameOrOverwrite(structureSet, selPtv, "PTV20", selPtv.DicomType, false);
                 }
                 if (structMain != null && !structMain.Id.Equals("LAT_PEAKS", StringComparison.OrdinalIgnoreCase))
                 {
@@ -1742,7 +1750,26 @@ namespace MAAS_SFRThelper.ViewModels
 
                 var ptvTmp = ss.AddStructure("CONTROL", "ptv6670_tmp");
                 ptvTmp.ConvertToHighResolution();
+                if (RemoveWholePeaks && !createSingle)
+                {
+                    foreach (var sp in ss.Structures.Where(s => s.Id.StartsWith("Sphere_")))
+                    {
+                        var inside = sp.SegmentVolume.And(hull.SegmentVolume);
+                        if (inside.Volume >= sp.Volume)
+                        {
+                            ptvTmp.SegmentVolume = ptvTmp.Or(sp.SegmentVolume);
+                        }
+                        else
+                        {
+                            ss.RemoveStructure(sp);
+                        }
+                    }
+                    peaks.SegmentVolume = ptvTmp.SegmentVolume;
+                }
+                else
+                {
                     ptvTmp.SegmentVolume = peaks.SegmentVolume.And(hull.SegmentVolume);
+                }
 
                 ProgressValue += 25.0;
                 if (peaks.Volume > 0 && ptvTmp.Volume / peaks.Volume < 1.0)
@@ -1948,7 +1975,7 @@ namespace MAAS_SFRThelper.ViewModels
             target.Color = source.Color;  // keep the same colour if you like
         }
 
-        private Structure RenameOrOverwrite(StructureSet ss, Structure roi, string id, string dicomType)
+        private Structure RenameOrOverwrite(StructureSet ss, Structure roi, string id, string dicomType, bool removeSource = true)
         {
 
             var existing = ss.Structures.FirstOrDefault(s => s.Id.Equals(id, StringComparison.OrdinalIgnoreCase));
@@ -1970,7 +1997,8 @@ namespace MAAS_SFRThelper.ViewModels
                 newStruct.SegmentVolume = roi.SegmentVolume;
             else
                 ProcessStructure(roi, ss, newStruct);
-            ss.RemoveStructure(roi);
+            if (removeSource)
+                ss.RemoveStructure(roi);
 
             return newStruct;
         }
