@@ -863,7 +863,7 @@ namespace MAAS_SFRThelper.ViewModels
                     ptvRetract = structureSet.AddStructure("CONTROL", "ptvRetract");
                 }
                 double margin = vThresh == 100 ? -1.01 * sphereRadius : -sphereRadius * vThresh / 100.0;
-                ptvRetract.SegmentVolume = ptv.Margin(margin);
+                ptvRetract.SegmentVolume = ptv.Margin(margin - 5);
 
                 // void structure
                 Structure ptvRetractVoid = null;
@@ -1749,12 +1749,13 @@ namespace MAAS_SFRThelper.ViewModels
 
 
                 var ptvTmp = ss.AddStructure("CONTROL", "ptv6670_tmp");
+                var inside = ss.AddStructure("CONTROL", "inside");
                 ptvTmp.ConvertToHighResolution();
                 if (RemoveWholePeaks && !createSingle)
                 {
                     foreach (var sp in ss.Structures.Where(s => s.Id.StartsWith("Sphere_")))
                     {
-                        var inside = sp.SegmentVolume.And(hull.SegmentVolume);
+                        inside.SegmentVolume = sp.SegmentVolume.And(hull.SegmentVolume);
                         if (inside.Volume >= sp.Volume)
                         {
                             ptvTmp.SegmentVolume = ptvTmp.Or(sp.SegmentVolume);
@@ -1770,6 +1771,8 @@ namespace MAAS_SFRThelper.ViewModels
                 {
                     ptvTmp.SegmentVolume = peaks.SegmentVolume.And(hull.SegmentVolume);
                 }
+
+                ss.RemoveStructure(inside);
 
                 ProgressValue += 25.0;
                 if (peaks.Volume > 0 && ptvTmp.Volume / peaks.Volume < 1.0)
